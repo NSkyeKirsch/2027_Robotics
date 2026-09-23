@@ -1,6 +1,5 @@
 #include <Wire.h>
-
-#include <ArduinoJson.h>
+#include "UART_Handler.h"
 
 #define I2C_ADDR 0x34
 #define ADC_BAT_ADDR 0
@@ -9,6 +8,10 @@
 #define MOTOR_FIXED_PWM_ADDR      31      // range -100~100, open loop ctrl
 #define MOTOR_FIXED_SPEED_ADDR    51      // closed loop ctrl, pulses per 10ms, range typically Â±50
 #define MOTOR_ENCODER_TOTAL_ADDR  60      // total pulse count, travel distance can be determined
+
+// UART definitions
+#define UART_RX 0
+#define UART_TX 1
 
 // Distance-Traveled = (Pulse-Count/Pulses-per-Revolution) * (3.14159*Wheel-Diameter)
 
@@ -48,59 +51,6 @@ void Running(int8_t running_mode[4]) // input is an array of 4 integers
 
 }
 
-// Sample receive and then motor control using UART (115200 baud) and ArduinoJSON by Benoit Blanchon
-// EX: data is a JSON structured command with a priority attachment function
-// JSON format: command, priority, speed (keep format as condensed as possible bc of small SRAM)
-
-// sample JSON (cmd = command, fwd = forward, pri = priority, spd = speed)
-struct UART_DATA    // This variable is where received UART data would be but for now will be from CMD[]
-{
-  const char* command;
-  int priority;
-  int speed;
-};
-
-UART_DATA uartDATA;   // Initialization of struct as uartDATA
-
-DynamicJsonDocument doc(200);   // dynamically allocate 200 bytes of memory in the heap
-char CMD[] = "{\"cmd\":\"FWD\",\"pri\":1,\"spd\":30}";    // hard coded command for now but needs to be replaced with whatever data stream from UART line 
-
-DeserializationError error = deserializeJson(doc, CMD);  // Deserialize the JSON packet and store into an error for checking
-
-/*
-if(error)               needs to be in a function or gives unqualified-id error
-{
-  Serial.print(F("deserializeJson() failed: "));
-  Serial.println(error.f_str());
-  return;
-}
-*/ 
-
-// Get values from CMD[]
-const char* command = doc["cmd"];
-int priority = doc["pri"];
-int speed = doc["spd"];         // This takes the parsed data and places it into normal variables instead of char types
-
-void dataRead()                 // point to parsed data and use for checks (right now speed is not used)
-{
-  uartDATA.command = command;   // once in use we can convert fwd, back, stop etc into enums instead of hard coding command checks
-  uartDATA.priority = priority;
-  uartDATA.speed = speed;       // now FWD is the command with priority 1 and speed of 30 
-
-  if(strcmp(uartDATA.command, "FWD") == 0)    // once in use we can convert fwd, back, stop etc into enums instead of hard coding command checks
-  {
-    Running(car_forward);
-  }
-  else if(strcmp(uartDATA.command, "BACK") == 0)
-  {
-    Running(car_back);
-  }
-  else if(strcmp(uartDATA.command, "STOP") == 0)
-  {
-    Running(car_stop);
-  }
-}
-
 void setup() {
   Wire.begin();
   delay(200);
@@ -111,9 +61,33 @@ void setup() {
 
   // UART init for dataRead() example
   Serial.begin(115200);   // Init UART over onboard USB at 115200 baud rate
+  Serial1.begin(115200, SERIAL_8N1, UART_RX, UART_TX); // Init UART over serial1 pins
 }
 
 void loop() {
+
+  // Read over UART and Deserialize 
+  readUART();
+
+  switch(uartDATA.command)
+  {
+    case CMD_FWD:
+    Running(car_forward);
+    break;
+
+    case CMD_BACK: 
+    Running(car_back);
+    break; 
+
+    case CMD_STOP:
+    Running(car_stop);
+    break;
+
+    default:
+    break;
+
+  }
+  
   //Running(car_forward);              
   Running(car_back);
   Running(car_stop);
